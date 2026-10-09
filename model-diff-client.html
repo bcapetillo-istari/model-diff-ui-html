@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Model Diff Client</title>
+<style>
+  :root {
+    --page-bg: #15171c;
+    --titlebar: #2d2d2f;
+    --body: #0a0d12;
+    --panel: #171d28;
+    --panel-border: #2a3140;
+    --input-bg: #242a35;
+    --input-border: #3a4252;
+    --placeholder: #78818f;
+    --text: #e6e9ee;
+    --muted: #aab2bf;
+    --btn-dark: #2a313f;
+    --btn-dark-border: #3a4252;
+    --btn-dark-hover: #333c4d;
+    --close-bg: #1b2230;
+    --accent: #2f6bff;
+    --accent-hover: #4a86ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--page-bg);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text);
+    padding: 24px;
+  }
+
+  .window {
+    max-width: 880px;
+    margin: 0 auto;
+    background: var(--body);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .65);
+  }
+
+  .window-body { padding: 10px 26px 22px; }
+
+  /* Grouped section with legend sitting on the top border (native dialog look) */
+  fieldset.section {
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    background: var(--panel);
+    padding: 20px 26px;
+    margin: 26px 0 0;
+    min-width: 0;
+  }
+  fieldset.section > legend {
+    padding: 0 8px;
+    margin-left: 4px;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  /* Field rows: fixed label column + flexible field + optional button */
+  .row { display: flex; align-items: center; gap: 16px; margin: 16px 0; }
+  .row:first-of-type { margin-top: 6px; }
+  .row:last-of-type { margin-bottom: 4px; }
+  .row-label {
+    flex: 0 0 190px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .row-field { flex: 1 1 auto; display: flex; align-items: center; gap: 14px; min-width: 0; }
+
+  input[type="text"], textarea {
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 9px;
+    color: var(--text);
+    font-size: 15px;
+    font-family: inherit;
+    padding: 12px 14px;
+    outline: none;
+  }
+  input::placeholder, textarea::placeholder { color: var(--placeholder); }
+  input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
+
+  .prompt-area {
+    min-height: 230px;
+    resize: vertical;
+    border: 1.5px solid var(--accent);
+    line-height: 1.5;
+  }
+
+  /* Buttons */
+  .btn {
+    flex: 0 0 auto;
+    border-radius: 9px;
+    padding: 11px 18px;
+    font-size: 15px;
+    font-weight: 600;
+    font-family: inherit;
+    border: 1px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-dark { background: var(--btn-dark); color: var(--text); border-color: var(--btn-dark-border); }
+  .btn-dark:hover { background: var(--btn-dark-hover); }
+  .btn-browse { font-size: 16px; padding: 11px 20px; }
+  .btn-blue { background: var(--accent); color: #fff; }
+  .btn-blue:hover { background: var(--accent-hover); }
+  .btn-close { background: var(--close-bg); color: var(--text); border-color: var(--btn-dark-border); }
+  .btn-close:hover { background: #232c3d; }
+
+  /* Footer actions */
+  .footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 14px;
+    padding: 24px 2px 2px;
+  }
+  .footer .btn { padding: 12px 26px; }
+</style>
+</head>
+<body>
+<!--
+  Static UI replica of the Model Diff Client. No behavior yet — JS wiring comes
+  next. Stable IDs for that stage:
+    #prompt
+    #model-a / #browse-a, #model-a-artifact / #refresh-a-artifact
+    #model-b / #browse-b, #model-b-artifact / #refresh-b-artifact
+    #llm-provider / #refresh-provider, #llm-model
+    #registry-url, #auth-token, #llm-credential / #refresh-credential
+    #btn-close, #btn-submit
+-->
+<div class="window" role="dialog" aria-label="Model Diff Client">
+  <div class="window-body">
+
+    <!-- Prompt -->
+    <fieldset class="section">
+      <legend>Prompt</legend>
+      <textarea id="prompt" class="prompt-area" placeholder="Enter the LLM prompt text…"></textarea>
+    </fieldset>
+
+    <!-- Istari Models to Diff -->
+    <fieldset class="section">
+      <legend>Istari Models to Diff</legend>
+
+      <div class="row">
+        <label class="row-label" for="model-a">Model A:</label>
+        <div class="row-field">
+          <input type="text" id="model-a" placeholder="Revision ID…">
+          <button type="button" id="browse-a" class="btn btn-dark btn-browse">Browse…</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="row-label" for="model-a-artifact">Model A Artifact:</label>
+        <div class="row-field">
+          <input type="text" id="model-a-artifact" placeholder="Enter a model revision ID…">
+          <button type="button" id="refresh-a-artifact" class="btn btn-dark">Refresh</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="row-label" for="model-b">Model B:</label>
+        <div class="row-field">
+          <input type="text" id="model-b" placeholder="Revision ID…">
+          <button type="button" id="browse-b" class="btn btn-dark btn-browse">Browse…</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="row-label" for="model-b-artifact">Model B Artifact:</label>
+        <div class="row-field">
+          <input type="text" id="model-b-artifact" placeholder="Enter a model revision ID…">
+          <button type="button" id="refresh-b-artifact" class="btn btn-dark">Refresh</button>
+        </div>
+      </div>
+    </fieldset>
+
+    <!-- LLM -->
+    <fieldset class="section">
+      <legend>LLM</legend>
+
+      <div class="row">
+        <label class="row-label" for="llm-provider">Provider:</label>
+        <div class="row-field">
+          <input type="text" id="llm-provider" placeholder="Enter the registry URL and Istari auth token…">
+          <button type="button" id="refresh-provider" class="btn btn-dark">Refresh</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="row-label" for="llm-model">Model:</label>
+        <div class="row-field">
+          <input type="text" id="llm-model" placeholder="Enter the registry URL and Istari auth token…">
+        </div>
+      </div>
+    </fieldset>
+
+    <!-- Authentication -->
+    <fieldset class="section">
+      <legend>Authentication</legend>
+
+      <div class="row">
+        <label class="row-label" for="registry-url">Istari Registry URL:</label>
+        <div class="row-field">
+          <input type="text" id="registry-url" placeholder="https://…">
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="row-label" for="auth-token">Istari Auth Token:</label>
+        <div class="row-field">
+          <input type="text" id="auth-token" placeholder="Enter token…">
+        </div>
+      </div>
+
+      <div class="row">
+        <label class="row-label" for="llm-credential">LLM Credential:</label>
+        <div class="row-field">
+          <input type="text" id="llm-credential" placeholder="Enter the registry URL and Istari auth token…">
+          <button type="button" id="refresh-credential" class="btn btn-dark">Refresh</button>
+        </div>
+      </div>
+    </fieldset>
+
+    <!-- Actions -->
+    <div class="footer">
+      <button type="button" id="btn-close" class="btn btn-close">Close</button>
+      <button type="button" id="btn-submit" class="btn btn-blue">Submit</button>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
