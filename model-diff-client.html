@@ -22,6 +22,8 @@
     --close-bg: #1b2230;
     --accent: #2f6bff;
     --accent-hover: #4a86ff;
+    --ok: #3fb950;
+    --fail: #f85149;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
@@ -72,7 +74,7 @@
   }
   .row-field { flex: 1 1 auto; display: flex; align-items: center; gap: 14px; min-width: 0; }
 
-  input[type="text"], textarea {
+  input[type="text"], textarea, select {
     flex: 1 1 auto;
     width: 100%;
     min-width: 0;
@@ -85,8 +87,10 @@
     padding: 12px 14px;
     outline: none;
   }
+  select { appearance: none; cursor: pointer; }
+  select:disabled { color: var(--placeholder); cursor: default; }
   input::placeholder, textarea::placeholder { color: var(--placeholder); }
-  input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
+  input[type="text"]:focus, textarea:focus, select:focus { border-color: var(--accent); }
 
   .prompt-area {
     min-height: 230px;
@@ -107,11 +111,12 @@
     cursor: pointer;
     white-space: nowrap;
   }
+  .btn:disabled { opacity: .5; cursor: default; }
   .btn-dark { background: var(--btn-dark); color: var(--text); border-color: var(--btn-dark-border); }
-  .btn-dark:hover { background: var(--btn-dark-hover); }
+  .btn-dark:hover:not(:disabled) { background: var(--btn-dark-hover); }
   .btn-browse { font-size: 16px; padding: 11px 20px; }
   .btn-blue { background: var(--accent); color: #fff; }
-  .btn-blue:hover { background: var(--accent-hover); }
+  .btn-blue:hover:not(:disabled) { background: var(--accent-hover); }
   .btn-close { background: var(--close-bg); color: var(--text); border-color: var(--btn-dark-border); }
   .btn-close:hover { background: #232c3d; }
 
@@ -123,18 +128,37 @@
     padding: 24px 2px 2px;
   }
   .footer .btn { padding: 12px 26px; }
+
+  /* Browse model picker modal */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    width: min(560px, 90vw); max-height: 80vh; display: flex; flex-direction: column;
+    background: var(--body); border: 1px solid var(--panel-border); border-radius: 12px; padding: 16px;
+  }
+  .modal h3 { margin: 0 0 10px; font-size: 15px; }
+  .modal .status { color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+  .modal .list { flex: 1 1 auto; overflow-y: auto; border: 1px solid var(--panel-border); border-radius: 8px; }
+  .modal .item { padding: 9px 12px; cursor: pointer; border-bottom: 1px solid rgba(42,49,64,.5); }
+  .modal .item:hover { background: var(--panel); }
+  .modal .item .name { font-size: 14px; }
+  .modal .item .rev { font-size: 11px; color: var(--muted); font-family: ui-monospace, Menlo, monospace; }
+  .modal .modal-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
 </style>
 </head>
 <body>
 <!--
-  Static UI replica of the Model Diff Client. No behavior yet — JS wiring comes
-  next. Stable IDs for that stage:
+  Model Diff Client — static UI + in-page network layer calling the Istari
+  registry REST API with a Bearer token. Stable IDs:
     #prompt
     #model-a / #browse-a, #model-a-artifact / #refresh-a-artifact
     #model-b / #browse-b, #model-b-artifact / #refresh-b-artifact
     #llm-provider / #refresh-provider, #llm-model
     #registry-url, #auth-token, #llm-credential / #refresh-credential
-    #btn-close, #btn-submit
+    #btn-close, #btn-submit, #status
 -->
 <div class="window" role="dialog" aria-label="Model Diff Client">
   <div class="window-body">
@@ -160,8 +184,8 @@
       <div class="row">
         <label class="row-label" for="model-a-artifact">Model A Artifact:</label>
         <div class="row-field">
-          <input type="text" id="model-a-artifact" placeholder="Enter a model revision ID…">
-          <button type="button" id="refresh-a-artifact" class="btn btn-dark">Refresh</button>
+          <input type="text" id="model-a-artifact" placeholder="Optional — leave blank to diff the model revision">
+          <button type="button" id="refresh-a-artifact" class="btn btn-dark" disabled>Refresh</button>
         </div>
       </div>
 
@@ -176,8 +200,8 @@
       <div class="row">
         <label class="row-label" for="model-b-artifact">Model B Artifact:</label>
         <div class="row-field">
-          <input type="text" id="model-b-artifact" placeholder="Enter a model revision ID…">
-          <button type="button" id="refresh-b-artifact" class="btn btn-dark">Refresh</button>
+          <input type="text" id="model-b-artifact" placeholder="Optional — leave blank to diff the model revision">
+          <button type="button" id="refresh-b-artifact" class="btn btn-dark" disabled>Refresh</button>
         </div>
       </div>
     </fieldset>
@@ -189,7 +213,9 @@
       <div class="row">
         <label class="row-label" for="llm-provider">Provider:</label>
         <div class="row-field">
-          <input type="text" id="llm-provider" placeholder="Enter the registry URL and Istari auth token…">
+          <select id="llm-provider" disabled>
+            <option value="">Enter the registry URL and Istari auth token…</option>
+          </select>
           <button type="button" id="refresh-provider" class="btn btn-dark">Refresh</button>
         </div>
       </div>
@@ -197,7 +223,9 @@
       <div class="row">
         <label class="row-label" for="llm-model">Model:</label>
         <div class="row-field">
-          <input type="text" id="llm-model" placeholder="Enter the registry URL and Istari auth token…">
+          <select id="llm-model" disabled>
+            <option value="">Enter the registry URL and Istari auth token…</option>
+          </select>
         </div>
       </div>
     </fieldset>
@@ -223,13 +251,16 @@
       <div class="row">
         <label class="row-label" for="llm-credential">LLM Credential:</label>
         <div class="row-field">
-          <input type="text" id="llm-credential" placeholder="Enter the registry URL and Istari auth token…">
+          <select id="llm-credential" disabled>
+            <option value="">Enter the registry URL and Istari auth token…</option>
+          </select>
           <button type="button" id="refresh-credential" class="btn btn-dark">Refresh</button>
         </div>
       </div>
     </fieldset>
 
     <!-- Actions -->
+    <div id="status" style="padding:8px 2px 0;font-size:13px;color:var(--muted);min-height:18px;"></div>
     <div class="footer">
       <button type="button" id="btn-close" class="btn btn-close">Close</button>
       <button type="button" id="btn-submit" class="btn btn-blue">Submit</button>
@@ -237,5 +268,619 @@
 
   </div>
 </div>
+
+<!-- Browse picker (populated by JS) -->
+<div class="modal-backdrop" id="browse-modal">
+  <div class="modal">
+    <h3>Select a Model</h3>
+    <div class="status" id="browse-status">Loading…</div>
+    <input type="text" id="browse-search" placeholder="Search models…">
+    <div class="list" id="browse-list"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-close" id="browse-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ============================================================================
+ * Istari network layer — one clean top-level function per API call.
+ * Built from real captured requests (SDK-to-URL.md). Each call is a plain
+ * fetch() with a Bearer token, so it runs in-browser inside the iframe.
+ *
+ * The API is a MIX of v2 and v3 — the version is baked into each endpoint
+ * path below (do not assume one global prefix).
+ *
+ * STATUS:
+ *  (A) HOST — RESOLVED: accept the fileservice-v2 URL, call the api. host
+ *      (apiBase() swaps the leading subdomain).
+ *  (B) JOB POST — RESOLVED from execute_job.har: two-phase submit. The
+ *      parameters are uploaded to content-addressed storage (salted SHA-384,
+ *      GET upload-url -> presigned S3 PUT) and the job-create body references
+ *      the resulting content/properties tokens. See makeParametersRevision().
+ *      One runtime risk remains: S3 bucket CORS must allow the iframe's
+ *      opaque ("null") origin for the PUT.
+ *  (C) FUNCTIONS — RESOLVED: parsed/submitted in the PySide6 format (LLM tool,
+ *      execute_<provider>_<model>). One small FLAG remains on the tool-filter
+ *      query param name.
+ * ==========================================================================*/
+
+// The UI accepts/derives the backwards-compatible fileservice-v2 form.
+const REGISTRY_SUBDOMAIN = 'fileservice-v2';
+
+// (A) RESOLVED: API calls go to the `api.` host. The base domain is identical
+// between the two forms; only the leading subdomain differs, so swap it for
+// every request:  https://fileservice-v2.demo.istari.app -> https://api.demo.istari.app
+function apiBase(registryUrl) {
+  try {
+    const u = new URL(registryUrl);
+    const parts = u.hostname.split('.');
+    parts[0] = 'api'; // fileservice-v2 (or anything) -> api; idempotent if already api
+    u.hostname = parts.join('.');
+    return u.origin;
+  } catch (e) {
+    return registryUrl.replace(/\/+$/, '');
+  }
+}
+
+// Full paths, version baked in per the captures.
+const EP = {
+  credentials: ()          => `/registry/api/v2/credentials`,
+  resources:   ()          => `/registry/api/v3/resources`,
+  model:       (id)        => `/registry/api/v2/models/${id}`,
+  functions:   ()          => `/registry/api/v2/modules/versions/functions`,
+  resource:    (rid)       => `/registry/api/v3/resources/${rid}`,
+  revision:    (rid, rev)  => `/registry/api/v3/resources/${rid}/revisions/${rev}`,
+  job:         (id)        => `/registry/api/v2/jobs/${id}`,
+  jobs:        (modelId)   => `/registry/api/v2/models/${modelId}/jobs`,
+  uploadUrl:   (sha)       => `/registry/api/v2/tokens/${sha}/upload-url`,
+};
+
+class IstariError extends Error {
+  constructor(status, body) {
+    super(`Istari API ${status}: ${String(body).slice(0, 300)}`);
+    this.status = status;
+    this.body = body;
+  }
+}
+
+// Derive the embedding site's domain. The iframe is an opaque-origin srcdoc
+// frame, so its own location has no host — read it from the parent instead.
+function hostDomain() {
+  let origin = '';
+  try {
+    if (location.ancestorOrigins && location.ancestorOrigins.length) origin = location.ancestorOrigins[0];
+  } catch (e) { /* ignore */ }
+  if (!origin && document.referrer) {
+    try { origin = new URL(document.referrer).origin; } catch (e) { /* ignore */ }
+  }
+  if (!origin || origin === 'null') return '';
+  try { return new URL(origin).hostname; } catch (e) { return ''; }
+}
+
+// Build the registry URL from the host domain per the instruction:
+// host "demo.istari.app" -> "https://fileservice-v2.demo.istari.app".
+function deriveRegistryUrl() {
+  const host = hostDomain();
+  return host ? `https://${REGISTRY_SUBDOMAIN}.${host}` : '';
+}
+
+// Core authenticated request. `repeatQuery` supports repeated params
+// (type_name=model&type_name=artifact). Returns parsed JSON (object OR array).
+async function api(registryUrl, token, path, opts = {}) {
+  const { method = 'GET', query, repeatQuery, body } = opts;
+  const url = new URL(apiBase(registryUrl) + path);
+  if (query) {
+    for (const [k, v] of Object.entries(query)) {
+      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
+    }
+  }
+  if (repeatQuery) {
+    for (const [k, arr] of Object.entries(repeatQuery)) {
+      for (const v of arr) url.searchParams.append(k, String(v));
+    }
+  }
+  const headers = { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' };
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  const res = await fetch(url.href, {
+    method, headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new IstariError(res.status, await res.text().catch(() => ''));
+  if (res.status === 204) return null;
+  return res.json();
+}
+
+/* ---- Top-level API functions (one per call) ----------------------------- */
+
+// #1 — Linked Account credentials (LLM Credential dropdown).
+// GET /registry/api/v2/credentials -> PLAIN ARRAY; status is a plain string.
+async function fetchCredentials(registryUrl, token) {
+  const rows = await api(registryUrl, token, EP.credentials());
+  const list = Array.isArray(rows) ? rows : (rows.items || []);
+  return list
+    .filter((c) => ((c.status && c.status.value) || c.status) === 'active')
+    .map((c) => ({ id: c.id, label: `${c.name} - ${c.account_identity || ''} (${c.id})` }));
+}
+
+// #2 — Resources for the Browse picker.
+// GET /registry/api/v3/resources?type_name=model&type_name=artifact&... -> { items: [flat resources] }
+async function fetchResources(registryUrl, token, { types = ['model', 'artifact'] } = {}) {
+  const data = await api(registryUrl, token, EP.resources(), {
+    query: { size: 100, include_total: false, own_files_first: true },
+    repeatQuery: { type_name: types },
+  });
+  const items = data.items || [];
+  return items.map((r) => ({
+    label: r.name || r.display_name || r.resource_id,
+    revisionId: r.file_revision_id,   // what the Model A/B field holds
+    resourceId: r.resource_id,        // the model id the job URL needs
+    type: r.resource_type,
+    extension: r.extension,
+  }));
+}
+
+// #2b — Artifacts of one model. (Deferred this pass — artifacts are optional —
+// but kept correct: GET the model and read its nested `.artifacts[]`.)
+// GET /registry/api/v2/models/{modelId} -> { ..., artifacts: [ {id, file:{revisions:[...]}} ] }
+async function fetchModelArtifacts(registryUrl, token, modelId) {
+  const model = await api(registryUrl, token, EP.model(modelId));
+  return (model.artifacts || []).map(nestedRow);
+}
+
+// #3 — LLM functions (Provider/Model dropdowns).
+// GET /registry/api/v2/modules/versions/functions?input_extension=<ext>&status=supported&page&size
+// The endpoint filters by the INPUT FILE EXTENSION (not by tool) and returns
+// functions across many tools; we keep only the "LLM" tool and parse its
+// execute_<provider>_<model> names exactly like the PySide6 app.
+const LLM_TOOL_NAME = 'LLM';
+const LLM_FUNCTION_NAME_PREFIX = 'execute_';
+// Default input extension used until Model A's real type is known (Browse sets
+// it). The available LLM functions depend on the diff input's file type.
+const DEFAULT_INPUT_EXTENSION = 'pdf';
+async function fetchFunctions(registryUrl, token, inputExtension) {
+  const data = await api(registryUrl, token, EP.functions(), {
+    query: { input_extension: inputExtension, status: 'supported', page: 1, size: 100 },
+  });
+  const items = data.items || [];
+  const byRef = new Map(); // one row per version returned; collapse by reference
+  for (const fn of items) {
+    if (fn.tool_name !== LLM_TOOL_NAME) continue;     // keep only the LLM tool
+    const parsed = splitFunctionName(fn.name);         // execute_<provider>_<model>
+    if (!parsed) continue;
+    const ref = functionRef(fn);
+    byRef.set(ref, { provider: parsed.provider, model: parsed.model, functionRef: ref });
+  }
+  return [...byRef.values()].sort((a, b) => (a.provider + a.model).localeCompare(b.provider + b.model));
+}
+
+// Resolve a typed revision id -> its owning model (resource) id, by scanning
+// the resources list for the item whose file_revision_id matches. (Browse
+// avoids this by capturing resourceId directly.)
+async function resolveResourceId(registryUrl, token, revisionId) {
+  const resources = await fetchResources(registryUrl, token);
+  const hit = resources.find((r) => r.revisionId === revisionId);
+  return hit ? hit.resourceId : null;
+}
+
+/* ---- Content-addressed upload of the parameters file --------------------
+ * (B) RESOLVED from execute_job.har. Submitting a job first uploads the
+ * parameters file to content-addressed storage in TWO parts — the content and
+ * a properties descriptor — each keyed by a SALTED SHA-384:
+ *     sha = SHA-384( contentBytes + saltHexAscii )   // ONE salt per revision
+ * For each part: GET /tokens/{sha}/upload-url -> { url: <presigned S3 PUT> },
+ * then PUT the raw bytes to that URL (Content-Type: application/octet-stream,
+ * and NO Authorization — the URL is already presigned). The job-create body
+ * then embeds a `revision` referencing both tokens; the client mints the UUIDs
+ * and timestamps.
+ * NOTE: the S3 PUT is cross-origin; the bucket's CORS must permit this iframe's
+ * (opaque, "null") origin or the upload will fail the preflight at runtime.
+ * ------------------------------------------------------------------------ */
+const enc = new TextEncoder();
+function uuid() { return crypto.randomUUID(); }
+function nowIso() { return new Date().toISOString(); }
+function randomSaltHex() {
+  const a = new Uint8Array(16); crypto.getRandomValues(a);
+  return [...a].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function saltedSha384(contentStr, saltHex) {
+  const content = enc.encode(contentStr), salt = enc.encode(saltHex);
+  const combined = new Uint8Array(content.length + salt.length);
+  combined.set(content); combined.set(salt, content.length);
+  const digest = await crypto.subtle.digest('SHA-384', combined);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function uploadToken(registryUrl, token, sha, contentStr) {
+  const { url } = await api(registryUrl, token, EP.uploadUrl(sha));
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/octet-stream' }, // signed header; no Authorization
+    body: contentStr,
+  });
+  if (!res.ok) throw new IstariError(res.status, await res.text().catch(() => ''));
+}
+// Build the parameters.json `revision` object for the job-create body.
+// The content/properties tokens (sha+salt) are computed locally; the S3 PUTs
+// are a SEPARATE step gated by `upload`. The server requires a fully-formed
+// revision either way, so even the no-upload path returns all fields — it just
+// doesn't push the bytes to storage (used to bypass the browser->S3 CORS wall
+// for testing; the referenced content then won't exist in S3, so a job that
+// actually reads its parameters would fail downstream when the agent fetches).
+async function makeParametersRevision(registryUrl, token, paramsObj, sources, { upload = true } = {}) {
+  const contentStr = JSON.stringify(paramsObj);
+  const size = enc.encode(contentStr).length;
+  // Property key order matches the capture exactly (server stores this blob).
+  const propsStr = `{"file_name":"parameters.json","size":${size},"extension":"json","mime":"application/json"}`;
+  const salt = randomSaltHex();
+  const [contentSha, propsSha] = await Promise.all([
+    saltedSha384(contentStr, salt),
+    saltedSha384(propsStr, salt),
+  ]);
+  if (upload) {
+    await Promise.all([
+      uploadToken(registryUrl, token, contentSha, contentStr),
+      uploadToken(registryUrl, token, propsSha, propsStr),
+    ]);
+  }
+  const created = nowIso();
+  const revisionId = uuid();
+  return {
+    id: revisionId,
+    created,
+    file_id: null,
+    content_token: { id: uuid(), created, sha: contentSha, salt },
+    properties_token: { id: uuid(), created, sha: propsSha, salt },
+    archive_status_history: [{
+      id: uuid(), created, name: 'Active', reason: null,
+      created_by_id: null, file_revision_id: revisionId,
+    }],
+    name: 'parameters.json',
+    extension: 'json',
+    size,
+    mime: 'application/json',
+    sources,
+  };
+}
+
+// #4 — Submit the diff job.
+// POST /registry/api/v2/models/{modelId}/jobs?function_name&tool_name&tool_version&operating_system
+// With a prompt: upload parameters.json, then reference it (full path).
+// Without a prompt: build a shape-valid revision with locally-computed tokens
+// for empty params ({}) but SKIP the S3 upload — sidesteps the browser->S3
+// CORS wall for current in-iframe testing of the create+poll pipeline.
+async function submitJob(registryUrl, token, {
+  modelId, functionRef, toolName, toolVersion, operatingSystem,
+  prompt, sources = [], authBindings = [],
+}) {
+  const hasPrompt = typeof prompt === 'string' && prompt.trim() !== '';
+  const revision = hasPrompt
+    ? await makeParametersRevision(registryUrl, token, { prompt }, sources, { upload: true })
+    : await makeParametersRevision(registryUrl, token, {}, sources, { upload: false });
+  const query = {
+    function_name: functionRef,
+    tool_name: toolName,
+    tool_version: toolVersion,
+    operating_system: operatingSystem,
+  };
+  return api(registryUrl, token, EP.jobs(modelId), {
+    method: 'POST',
+    query,
+    body: { revision, auth_bindings: authBindings },
+  });
+}
+
+// #5 — One job's current state. GET /registry/api/v2/jobs/{id}
+async function getJob(registryUrl, token, jobId) {
+  return api(registryUrl, token, EP.job(jobId));
+}
+
+// Current status = last entry of status_history (names are Capitalized:
+// Pending, Claimed, Validating, Running, Uploading, Completed).
+function jobStatus(job) {
+  const h = job.status_history || [];
+  return h.length ? h[h.length - 1].name : (job.status || '');
+}
+// FLAG: Completed confirmed from a capture; failure/cancel names inferred.
+const TERMINAL_JOB_STATUSES = ['Completed', 'Failed', 'Cancelled', 'Canceled', 'Error', 'Errored'];
+
+// #6 — Poll until a terminal status.
+async function pollJob(registryUrl, token, jobId, { intervalMs = 3000, timeoutMs = 600000, onUpdate } = {}) {
+  const started = Date.now();
+  for (;;) {
+    const job = await getJob(registryUrl, token, jobId);
+    const status = jobStatus(job);
+    if (onUpdate) onUpdate(status, job);
+    if (TERMINAL_JOB_STATUSES.includes(status)) return job;
+    if (Date.now() - started > timeoutMs) {
+      throw new Error(`Job ${jobId} poll timed out after ${timeoutMs}ms (last status: ${status})`);
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+/* ---- Parsing helpers ----------------------------------------------------- */
+
+// Nested v2 model/artifact -> { label, revisionId, resourceId }.
+function nestedRow(item) {
+  const revisions = (item.file && item.file.revisions) || [];
+  const revision = revisions.length ? revisions[revisions.length - 1] : null;
+  return {
+    label: fullName(revision) || item.id,
+    revisionId: revision ? revision.id : item.id,
+    resourceId: item.id,
+  };
+}
+function fullName(revision) {
+  if (!revision) return null;
+  if (revision.name) return revision.name;
+  if (revision.display_name) return revision.display_name;
+  return null;
+}
+// FunctionFetcher.function_ref: the "@<module>:<name>" reference to submit.
+// A qualified name is used as-is (just ensure a leading @); a bare name gets
+// its module prepended.
+function functionRef(fn) {
+  const name = fn.name || '';
+  if (name.includes(':')) return name.startsWith('@') ? name : `@${name}`;
+  return fn.module_name ? `@${fn.module_name}:${name}` : name;
+}
+
+// FunctionFetcher.split_name: "execute_<provider>_<model>" -> {provider, model};
+// null for anything without the prefix. Only the first underscore after the
+// prefix separates the halves (model names may contain underscores).
+function splitFunctionName(name) {
+  const bare = name.includes(':') ? name.slice(name.lastIndexOf(':') + 1) : name;
+  if (!bare.startsWith(LLM_FUNCTION_NAME_PREFIX)) return null;
+  const rest = bare.slice(LLM_FUNCTION_NAME_PREFIX.length);
+  const i = rest.indexOf('_');
+  const provider = i === -1 ? rest : rest.slice(0, i);
+  const model = i === -1 ? rest : rest.slice(i + 1);
+  if (!provider) return null;
+  return { provider, model: model || provider };
+}
+
+/* ============================================================================
+ * UI wiring
+ * ==========================================================================*/
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  prompt: $('prompt'),
+  modelA: $('model-a'), browseA: $('browse-a'),
+  modelB: $('model-b'), browseB: $('browse-b'),
+  provider: $('llm-provider'), refreshProvider: $('refresh-provider'),
+  model: $('llm-model'),
+  registry: $('registry-url'), token: $('auth-token'),
+  credential: $('llm-credential'), refreshCredential: $('refresh-credential'),
+  submit: $('btn-submit'), close: $('btn-close'), status: $('status'),
+};
+
+// Provider -> its function options; filled by loadFunctions().
+let functionsByProvider = new Map();
+
+function setStatus(msg, kind) {
+  els.status.textContent = msg || '';
+  els.status.style.color = kind === 'error' ? 'var(--fail)'
+    : kind === 'ok' ? 'var(--ok)' : 'var(--muted)';
+}
+function registryUrl() { return els.registry.value.trim(); }
+function authToken() { return els.token.value.trim(); }
+function haveAuth() { return registryUrl() && authToken(); }
+
+function fillSelect(sel, options, placeholder) {
+  sel.innerHTML = '';
+  if (!options.length) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = placeholder || 'None available';
+    sel.appendChild(o); sel.disabled = true; return;
+  }
+  for (const opt of options) {
+    const o = document.createElement('option');
+    o.value = opt.value; o.textContent = opt.label;
+    sel.appendChild(o);
+  }
+  sel.disabled = false;
+}
+
+async function loadCredentials() {
+  if (!haveAuth()) return;
+  els.credential.disabled = true;
+  fillSelect(els.credential, [], 'Loading credentials…');
+  try {
+    const creds = await fetchCredentials(registryUrl(), authToken());
+    fillSelect(els.credential, creds.map((c) => ({ value: c.id, label: c.label })),
+      'No active credentials for this token');
+    setStatus(`Loaded ${creds.length} credential(s).`, 'ok');
+  } catch (e) {
+    fillSelect(els.credential, [], 'Failed to load credentials');
+    setStatus(String(e.message || e), 'error');
+  }
+}
+
+function modelAExtension() {
+  return (els.modelA.dataset.extension || '').trim();
+}
+async function loadFunctions() {
+  if (!haveAuth()) return;
+  const ext = modelAExtension() || DEFAULT_INPUT_EXTENSION;
+  els.provider.disabled = true; els.model.disabled = true;
+  fillSelect(els.provider, [], 'Loading functions…');
+  fillSelect(els.model, [], '…');
+  try {
+    const fns = await fetchFunctions(registryUrl(), authToken(), ext);
+    functionsByProvider = new Map();
+    for (const fn of fns) {
+      if (!functionsByProvider.has(fn.provider)) functionsByProvider.set(fn.provider, []);
+      functionsByProvider.get(fn.provider).push(fn);
+    }
+    const providers = [...functionsByProvider.keys()].sort();
+    fillSelect(els.provider, providers.map((p) => ({ value: p, label: p })),
+      'No LLM functions found');
+    onProviderChanged();
+    setStatus(`Loaded ${fns.length} LLM function(s) for input type ".${ext}".`, 'ok');
+  } catch (e) {
+    fillSelect(els.provider, [], 'Failed to load functions');
+    fillSelect(els.model, [], '…');
+    setStatus(String(e.message || e), 'error');
+  }
+}
+
+function onProviderChanged() {
+  const fns = functionsByProvider.get(els.provider.value) || [];
+  // value = the @module:execute_<provider>_<model> reference submitted later.
+  fillSelect(els.model, fns.map((f) => ({ value: f.functionRef, label: f.model })),
+    'No models for this provider');
+}
+
+/* ---- Browse picker ------------------------------------------------------- */
+let browseTarget = null; // the input (modelA/modelB) being filled
+let browseResources = [];
+
+function openBrowse(targetInput) {
+  if (!haveAuth()) { setStatus('Enter the Registry URL and Auth Token first.', 'error'); return; }
+  browseTarget = targetInput;
+  $('browse-search').value = '';
+  $('browse-list').innerHTML = '';
+  $('browse-status').textContent = 'Loading…';
+  $('browse-modal').classList.add('open');
+  fetchResources(registryUrl(), authToken())
+    .then((rows) => {
+      browseResources = rows;
+      renderBrowse(rows);
+      $('browse-status').textContent = `${rows.length} resource(s) — click to select.`;
+    })
+    .catch((e) => { $('browse-status').textContent = String(e.message || e); });
+}
+function renderBrowse(rows) {
+  const list = $('browse-list');
+  list.innerHTML = '';
+  for (const r of rows) {
+    const item = document.createElement('div');
+    item.className = 'item';
+    item.innerHTML = `<div class="name"></div><div class="rev"></div>`;
+    item.querySelector('.name').textContent = `${r.label} [${r.type}]`;
+    item.querySelector('.rev').textContent = r.revisionId;
+    item.addEventListener('click', () => {
+      browseTarget.value = r.revisionId;
+      // Stash the resolved model id (so Submit need not look it up) and the
+      // file extension (which determines the available LLM functions).
+      browseTarget.dataset.resourceId = r.resourceId || '';
+      browseTarget.dataset.extension = r.extension || '';
+      $('browse-modal').classList.remove('open');
+      // Picking Model A can change the valid input type — refresh functions.
+      if (browseTarget === els.modelA) loadFunctions();
+    });
+    list.appendChild(item);
+  }
+}
+function closeBrowse() { $('browse-modal').classList.remove('open'); }
+
+/* ---- Submit -------------------------------------------------------------- */
+async function onSubmit() {
+  const missing = [];
+  if (!registryUrl()) missing.push('Istari Registry URL');
+  // Prompt is optional: without it we skip the parameters upload (see submitJob).
+  if (!els.modelA.value.trim()) missing.push('Model A');
+  if (!els.modelB.value.trim()) missing.push('Model B');
+  if (!authToken()) missing.push('Istari Auth Token');
+  if (!els.credential.value) missing.push('LLM Credential');
+  if (!els.model.value) missing.push('LLM Provider and Model');
+  if (missing.length) { setStatus('Missing: ' + missing.join(', '), 'error'); return; }
+
+  els.submit.disabled = true;
+  try {
+    // Model A's model id drives the job URL. Prefer the one Browse captured;
+    // fall back to resolving the typed revision id against the resource list.
+    setStatus('Resolving Model A…');
+    let modelAId = els.modelA.dataset.resourceId || '';
+    if (!modelAId) modelAId = await resolveResourceId(registryUrl(), authToken(), els.modelA.value.trim());
+    if (!modelAId) {
+      setStatus('Could not resolve Model A to a model id — pick it via Browse…', 'error');
+      els.submit.disabled = false; return;
+    }
+
+    // Artifacts optional: a blank artifact field means diff the model revision.
+    const revA = els.modelA.value.trim();
+    const revB = els.modelB.value.trim();
+    const sources = [
+      { revision_id: revA, relationship_identifier: 'file1' },
+      { revision_id: revB, relationship_identifier: 'file2' },
+    ];
+    // PySide6 submit format: the LLM function IS the provider/model, under the
+    // "LLM" tool with no tool version; the credential binds to the function's
+    // "auth_token" input; the job runs on RHEL 9.
+    const authBindings = [{ input_name: 'auth_token', credential_id: els.credential.value }]; // LLM_AUTH_INPUT_NAME
+
+    setStatus(els.prompt.value.trim() ? 'Uploading parameters and submitting job…' : 'Submitting job without parameters…');
+    const created = await submitJob(registryUrl(), authToken(), {
+      modelId: modelAId,
+      functionRef: els.model.value,
+      toolName: LLM_TOOL_NAME,
+      toolVersion: null,
+      operatingSystem: 'RHEL 9',
+      prompt: els.prompt.value,
+      sources,
+      authBindings,
+    });
+
+    const jobId = (created && (created.id || (created.revision && created.revision.id))) || null;
+    if (!jobId) { setStatus('Job submitted but no job id in the response — check console.', 'error'); console.log(created); return; }
+
+    setStatus(`Job ${jobId} submitted — polling…`);
+    const finished = await pollJob(registryUrl(), authToken(), jobId, {
+      onUpdate: (status) => setStatus(`Job ${jobId}: ${status}…`),
+    });
+    setStatus(`Job ${jobId} finished: ${jobStatus(finished)}`, 'ok');
+  } catch (e) {
+    setStatus(String(e.message || e), 'error');
+  } finally {
+    els.submit.disabled = false;
+  }
+}
+
+/* ---- Events -------------------------------------------------------------- */
+els.browseA.addEventListener('click', () => openBrowse(els.modelA));
+els.browseB.addEventListener('click', () => openBrowse(els.modelB));
+els.refreshCredential.addEventListener('click', loadCredentials);
+els.refreshProvider.addEventListener('click', loadFunctions);
+els.provider.addEventListener('change', onProviderChanged);
+els.submit.addEventListener('click', onSubmit);
+els.close.addEventListener('click', () => {
+  // In the real iframe, ask the host to close the panel.
+  if (window.parent && window.parent !== window) window.parent.postMessage({ type: 'model-diff-close' }, '*');
+});
+$('browse-cancel').addEventListener('click', closeBrowse);
+$('browse-modal').addEventListener('click', (e) => { if (e.target.id === 'browse-modal') closeBrowse(); });
+$('browse-search').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  renderBrowse(browseResources.filter((r) =>
+    r.label.toLowerCase().includes(q) || (r.revisionId || '').toLowerCase().includes(q)));
+});
+
+// When both auth fields are present, auto-load the credential + function lists.
+let lastAuthKey = '';
+function maybeAutoLoad() {
+  if (!haveAuth()) return;
+  const key = registryUrl() + '|' + authToken();
+  if (key === lastAuthKey) return;
+  lastAuthKey = key;
+  loadCredentials();
+  loadFunctions();
+}
+els.registry.addEventListener('change', maybeAutoLoad);
+els.token.addEventListener('change', maybeAutoLoad);
+
+// On load: auto-fill the registry URL from the embedding site's domain.
+(function init() {
+  const derived = deriveRegistryUrl();
+  if (derived && !els.registry.value) {
+    els.registry.value = derived;
+    setStatus(`Registry URL set to ${derived} (from host domain). Add your auth token to load lists.`);
+  } else if (!derived) {
+    setStatus('Could not detect the host domain — enter the Registry URL manually.');
+  }
+})();
+</script>
 </body>
 </html>
