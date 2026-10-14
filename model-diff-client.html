@@ -406,7 +406,7 @@ async function fetchCredentials(registryUrl, token) {
 
 // #2 — Resources for the Browse picker.
 // GET /registry/api/v3/resources?type_name=model&type_name=artifact&... -> { items: [flat resources] }
-async function fetchResources(registryUrl, token, { types = ['model', 'artifact'] } = {}) {
+async function fetchResources(registryUrl, token, { types = ['model'] } = {}) {
   const data = await api(registryUrl, token, EP.resources(), {
     query: { size: 100, include_total: false, own_files_first: true },
     repeatQuery: { type_name: types },
@@ -435,6 +435,16 @@ async function fetchModelArtifacts(registryUrl, token, modelId) {
 // functions across many tools; we keep only the "LLM" tool and parse its
 // execute_<provider>_<model> names exactly like the PySide6 app.
 const LLM_TOOL_NAME = 'LLM';
+
+// TEMPORARY TEST SHIM — remove once the module author ships a workaround.
+// The browser cannot upload a parameters file (the iframe's opaque "null"
+// origin is rejected by the S3 bucket's CORS allowlist), so instead of
+// uploading we reference the parameters blob that an earlier SUCCESSFUL
+// desktop run already put in content-addressed storage. Submitting with the
+// Prompt box left blank reuses this job's parameters (its real smart_diff
+// prompt). The blob persists in S3, so this stays valid until that job's
+// content is garbage-collected or the module stops needing params at all.
+const TEST_PARAMS_FROM_JOB_ID = '6276bd2a-3d72-4099-8677-4e47b2d66865';
 const LLM_FUNCTION_NAME_PREFIX = 'execute_';
 // Default input extension used until Model A's real type is known (Browse sets
 // it). The available LLM functions depend on the diff input's file type.
@@ -551,12 +561,21 @@ async function makeParametersRevision(registryUrl, token, paramsObj, sources, { 
 // CORS wall for current in-iframe testing of the create+poll pipeline.
 async function submitJob(registryUrl, token, {
   modelId, functionRef, toolName, toolVersion, operatingSystem,
-  prompt, sources = [], authBindings = [],
+  prompt, paramsFromJobId, sources = [], authBindings = [],
 }) {
   const hasPrompt = typeof prompt === 'string' && prompt.trim() !== '';
-  const revision = hasPrompt
-    ? await makeParametersRevision(registryUrl, token, { prompt }, sources, { upload: true })
-    : await makeParametersRevision(registryUrl, token, {}, sources, { upload: false });
+  let revision;
+  if (hasPrompt) {
+    // Full path: upload the prompt as parameters.json (blocked by S3 CORS today).
+    revision = await makeParametersRevision(registryUrl, token, { prompt }, sources, { upload: true });
+  } else if (paramsFromJobId) {
+    // Reuse an existing job's already-uploaded parameters blob (no upload).
+    revision = await paramsRevisionFromExistingJob(registryUrl, token, paramsFromJobId, sources);
+  } else {
+    // No prompt, no reuse: shape-valid tokens but no bytes in S3 (agent fails
+    // to fetch params — only reaches Claimed).
+    revision = await makeParametersRevision(registryUrl, token, {}, sources, { upload: false });
+  }
   const query = {
     function_name: functionRef,
     tool_name: toolName,
@@ -573,6 +592,38 @@ async function submitJob(registryUrl, token, {
 // #5 — One job's current state. GET /registry/api/v2/jobs/{id}
 async function getJob(registryUrl, token, jobId) {
   return api(registryUrl, token, EP.job(jobId));
+}
+
+// Reuse an already-uploaded parameters file by copying its content/properties
+// tokens from an existing job. The blob is already in content-addressed
+// storage, so NO browser->S3 upload is needed — lets a job run with real,
+// fetchable parameters while the upload path is CORS-blocked (testing only).
+async function paramsRevisionFromExistingJob(registryUrl, token, jobId, sources) {
+  const job = await getJob(registryUrl, token, jobId);
+  const revs = (job.file && job.file.revisions) || [];
+  const src = revs.length ? revs[revs.length - 1] : null;
+  if (!src || !src.content_token || !src.properties_token) {
+    throw new Error(`Job ${jobId} has no parameters file revision to reuse`);
+  }
+  const created = nowIso();
+  const revisionId = uuid();
+  return {
+    id: revisionId,
+    created,
+    file_id: null,
+    // sha+salt point at the existing blob in storage; fresh ids are fine.
+    content_token: { id: uuid(), created, sha: src.content_token.sha, salt: src.content_token.salt },
+    properties_token: { id: uuid(), created, sha: src.properties_token.sha, salt: src.properties_token.salt },
+    archive_status_history: [{
+      id: uuid(), created, name: 'Active', reason: null,
+      created_by_id: null, file_revision_id: revisionId,
+    }],
+    name: src.name || 'parameters.json',
+    extension: src.extension || 'json',
+    size: src.size,
+    mime: src.mime || 'application/json',
+    sources,
+  };
 }
 
 // Current status = last entry of status_history (names are Capitalized:
@@ -801,10 +852,13 @@ async function onSubmit() {
     }
 
     // Artifacts optional: a blank artifact field means diff the model revision.
-    const revA = els.modelA.value.trim();
+    // Match model_diff_ui's input model: Model A is conveyed as the job's
+    // TARGET (its resource id = modelAId in the URL), which the function reads
+    // as file1 — so Model A is NOT sent as a source. Only Model B is an
+    // explicit source, tagged file2. (Model A's revision is used solely to
+    // resolve modelAId above.)
     const revB = els.modelB.value.trim();
     const sources = [
-      { revision_id: revA, relationship_identifier: 'file1' },
       { revision_id: revB, relationship_identifier: 'file2' },
     ];
     // PySide6 submit format: the LLM function IS the provider/model, under the
@@ -812,7 +866,11 @@ async function onSubmit() {
     // "auth_token" input; the job runs on RHEL 9.
     const authBindings = [{ input_name: 'auth_token', credential_id: els.credential.value }]; // LLM_AUTH_INPUT_NAME
 
-    setStatus(els.prompt.value.trim() ? 'Uploading parameters and submitting job…' : 'Submitting job without parameters…');
+    // Blank prompt -> reuse the hardcoded test blob (see TEST_PARAMS_FROM_JOB_ID).
+    const paramsFromJobId = TEST_PARAMS_FROM_JOB_ID;
+    setStatus(
+      els.prompt.value.trim() ? 'Uploading parameters and submitting job…'
+      : 'Reusing test parameters from job ' + paramsFromJobId + ' and submitting…');
     const created = await submitJob(registryUrl(), authToken(), {
       modelId: modelAId,
       functionRef: els.model.value,
@@ -820,6 +878,7 @@ async function onSubmit() {
       toolVersion: null,
       operatingSystem: 'RHEL 9',
       prompt: els.prompt.value,
+      paramsFromJobId,
       sources,
       authBindings,
     });

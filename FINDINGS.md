@@ -230,4 +230,8 @@ https://api.demo.istari.app/registry/api/v2/models/48ffd05e-4f85-41c4-846e-d6eb0
 
 Was able to call job w/200 manually copy/pasting the Authorization: Bearer <token> from my session (from the network tab), or by adding a PAT in place of <token>. This succeeded with a 200: *Jobs are able to be called from the Iframe and responses are able to be read w/out proxy server.* We still have to manually pass tokens into the HTML (acceptable for now), with the option of working with Cyber/platform teams to inject the current session's scoped token into the srcdoc so it is accessible.
 
+# Blocker (10/14/2026)
+
+All uploads (whether via the TS client or manual API calls) are direct to presigned S3 link. This means that all browser-originating uploads will by blocked by the browser due to S3's CORS policy. Bottom line: No workarounds for uploading from the browser have been identified.
+
 
