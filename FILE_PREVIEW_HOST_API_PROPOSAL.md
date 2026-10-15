@@ -1,0 +1,41 @@
+# Custom UI Extension for Istari Forward Deployed Engineers: The Need, Gap, and Proposed Solution
+
+FDEs need a fast way to build custom functionality for UI-heavy customers. Today they can interact with the platform programmatically through the Python SDK, but that only covers the backend. Options are limited when it comes to building last-mile solutions for non-technical, UI-focused customers, particularly in secure environments. 
+
+> ### Recent Real-World Example
+> The Model One customer requested the ability to perform LLM-assisted diffing between two files. While a simple use case, it was unable to be accomplished with the current version of the platform which *restricts functions to one file input, preventing any acceptable way of selecting two files to diff*. This platform UI gap prompted Wayne and Gerhard to build the Smart Diff application, consisting of a custom UI that allows the user to seamlessly search for and select two Istari files and pass them to a module function to perform the diff. 
+>
+> Smart Diff was built as a PySide6 desktop application, and worked perfectly as an extension of the platform that solved real user needs. The problem came when it was time to deploy Smart Diff into a secure environment. The only surface inside the Model One authorized boundary to deploy this desktop application to was an AWS Workspace. The friction of having busy, non-technical users log in to a separate, locked-down environment just to access another tool was deemed to outway the benefits provided by the tool. This capability would have been extremely valuable if it could have been accessed *inside* the platform, instead of having to log in to another desktop, manually launch the tool, and navigate back to Istari to continue working.
+
+The lesson generalizes well beyond Smart Diff. Whenever a customer needs a workflow the core platform does not yet support, FDEs should be able to build that workflow quickly and have it run where the user already works, inside Istari. The platform already has the right surface for this: the HTML resource preview, which renders custom HTML, CSS, and JavaScript directly in the app. An FDE could drop a Smart Diff style tool into that preview and the capability would live inside the platform, with no separate login and no second environment to maintain.
+
+These apps are buildable today (e.g. [model_diff_ui as HTML](https://github.com/bcapetillo-istari/model-diff-ui-html/tree/main)), and experimenting with/developing them has introduced some insights into how the File Preview pane can better support this kind of functionality. The key finding is that the sandbox that runs them is what currently blocks the few operations they need to talk to the platform. This is the gap we are seeking to fill.
+
+# Current File Preview iframe Limitations
+Current in-Istari HTML apps encounter (understandable) friction/blockers due to the secure iframe sandbox that renders them.
+
+1. **The user has to supply credentials by hand.** An HTML app has no way to know who the logged-in user is or to act on their behalf. The sandbox gives the app an opaque origin with no access to the host page, so it cannot read the session, the token, or any user identity from the surrounding Istari app. The only workaround today is to have the user paste and access token into the app manually. Manually entering long-lived credentials into apps introduces security risks and friction for the user.
+
+2. **Resource reads and writes are blocked.** Reading and writing file content is where most of the value is, and both are blocked. When reading/writing files in Istari, content moves directly between the runtime environment (in this case, the browser) to S3 over presigned URLs. S3 only honors those requests from origins on its CORS allowlist. The sandboxed iframe runs in an opaque "null" origin, which is not on the list and cannot (and should not) be added without letting arbitrary sandboxed content write to the bucket. So the browser understandably rejects every direct read or write from the app before it ever reaches S3. This is not something the app can work around in code. It holds even for the official Istari TypeScript and Python SDKs, which performs the exact same direct-to-file-store transfer over presigned URLs. Worth noting: the registry API itself *is* reachable from the iframe, so apps can already read metadata, list resources, submit jobs, and poll for results. It is specifically the direct object store transfer, the actual file content, that is blocked.
+
+3. **State cannot persist across renders.** Because the app runs in an opaque origin, every normal browser storage mechanism is unavailable to it. localStorage, sessionStorage, IndexedDB, the Cache API, and cookies all either throw or are silently ignored. A page refresh wipes everything the app was holding: entered values, selections, and any in-progress work. A potential solution to this would be to use lightweight JSON "state" files, uploaded to and managed in Istari, but this approach is currently blocked because of the object store CORS policy described above. In practice this makes in-Istari apps completely stateless across renders, which rules out any workflow that spans more than one uninterrupted session or requires more than a little user setup.
+
+## Proposed Solution
+
+These are the three blockers preventing us from building robust, in-Istari HTML "apps" today, and all are solvable through a parent page enhancement: **Expose a minimal message-passing API on the host page that responds to postMessage requests from the sandboxed File Preview iframe**. The host page runs in the real, CORS-allowlisted Istari origin, so it can perform the operations the sandboxed app cannot and hand the results back. Three operations are all that are required, and together they close every limitation listed above by *selectively* granting capabilities/permissions:
+
+1. *Read a resource revision*: The iframe sends a resource ID. The host, running in its real CORS-allowlisted origin, fetches that resource's current content (from the object store) and posts the content back to the iframe. Can be performed via API or SDK.
+
+2. *Write a resource revision*: The iframe sends a resource ID + content. The host, from that same allowlisted origin, makes the create-revision call to store the content as a new revision of that resource (content + properties to the object store, then registers the revision) and posts back the new revision ID to the iframe. Can be performed via API or SDK.
+
+3. *Provide a scoped, short-lived access token*: The host mints or relays a scoped, time-limited bearer token to the iframe so the app can make its own API/SDK calls directly. Should be refreshable via the same API. Could potentially relay the user's existing session token to allow/restrict the app to only the authorizations/accesses of the logged-in user. 
+
+## Outcomes
+
+These three operations provide the File Preview with the capability needed to solidify it as a real surface for custom applications, without weakening the sandbox or opening a new path to the object store.
+
+**For customers**, it means capabilities like Smart Diff can ship inside Istari, where the user already is. No separate login, no second environment, no context switching out to an AWS Workspace just to run one tool. For UI-heavy and heavily restricted customers like Model One, where that friction is highest, this is the difference between a capability being adopted and being abandoned.
+
+**For FDEs**, it means last-mile UI gaps can be closed rapidly instead of waiting on a platform release. An FDE can build a focused app against a documented, supported interface and deploy it as an HTML resource, in much the same way they already write SDK scripts today.
+
+**For the platform**, the cost is small and the security posture stays strong. The host page already holds a valid session and API access, so the three operations are mostly wiring rather than new infrastructure. Nothing new is exposed to the object store, the token handed to apps should be scoped and short-lived (and can be limited to the logged-in user's own access), and the sandbox stays exactly as locked down as it is now. The app only ever asks the host to act on its behalf, and the host stays in full control of what it will and will not do.
