@@ -74,7 +74,7 @@
   }
   .row-field { flex: 1 1 auto; display: flex; align-items: center; gap: 14px; min-width: 0; }
 
-  input[type="text"], textarea, select {
+  input[type="text"], input[type="password"], textarea, select {
     flex: 1 1 auto;
     width: 100%;
     min-width: 0;
@@ -90,7 +90,7 @@
   select { appearance: none; cursor: pointer; }
   select:disabled { color: var(--placeholder); cursor: default; }
   input::placeholder, textarea::placeholder { color: var(--placeholder); }
-  input[type="text"]:focus, textarea:focus, select:focus { border-color: var(--accent); }
+  input[type="text"]:focus, input[type="password"]:focus, textarea:focus, select:focus { border-color: var(--accent); }
 
   .prompt-area {
     min-height: 230px;
@@ -166,7 +166,7 @@
     <!-- Prompt -->
     <fieldset class="section">
       <legend>Prompt</legend>
-      <textarea id="prompt" class="prompt-area" placeholder="Enter the LLM prompt text…"></textarea>
+      <textarea disabled id="prompt" class="prompt-area" placeholder="Enter the LLM prompt text… (Currently disabled due to inability to connect to S3 from opaque origin)"></textarea>
     </fieldset>
 
     <!-- Istari Models to Diff -->
@@ -244,7 +244,7 @@
       <div class="row">
         <label class="row-label" for="auth-token">Istari Auth Token:</label>
         <div class="row-field">
-          <input type="text" id="auth-token" placeholder="Enter token…">
+          <input type="password" id="auth-token" placeholder="Enter token…">
         </div>
       </div>
 
